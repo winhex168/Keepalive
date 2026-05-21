@@ -23,4 +23,4 @@ jobs:
         env:
           VPS8_COOKIES: ${{ vars.VPS8_COOKIES }}
           VPS8_BASE_URL: "https://vps8.zz.cd"
-        run: node vps8-checkin/checkin.js
+        run: node vps8-checkin/checkin-cookie.js
