@@ -20,9 +20,14 @@ jobs:
   checkin:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
+          
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_TOKEN || github.token }}
 
       - name: Resolve checkin date
         id: checkin-date
@@ -45,7 +50,7 @@ jobs:
         if: steps.daily-success.outputs.cache-hit != 'true'
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.x'
           cache: 'pip'
 
       - name: Install system dependencies
@@ -104,33 +109,42 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-      # 👇 每天自动把 +cron 分钟
       - name: Auto increment cron
         if: success()
         run: |
-          # 读取当前 cron
           yaml_file=".github/workflows/vps8-checkin.yml"
-          cron_line=$(grep -E "^[ ]*- cron: '.*'" "$yaml_file" | head -1)
-          cron_val=$(echo "$cron_line" | sed -E "s/.*cron: '([0-9 ]+)'.*/\1/")
-          minute=$(echo "$cron_val" | awk '{print $1}')
-          hour=$(echo "$cron_val" | awk '{print $2}')
-          echo "当前时间：$hour 时 $minute 分"
+          
+          current_hour=$(date -u +"%H")
+          current_minute=$(date -u +"%M")
+          current_hour=$((10#$current_hour))
+          current_minute=$((10#$current_minute))
 
-          # 每次+分钟
-          new_minute=$((minute + 11))
-          new_hour=$hour
-          # 分钟满 60 进 1 小时
-          [ $new_minute -ge 60 ] && { new_minute=$((new_minute-60)); new_hour=$((hour+1)); }
-          # 小时满 1 归0 
-          [ $new_hour -ge 1 ] && new_hour=0
+          # 1. 计算当前时间距离 0 点的总分钟数，并加上随机增量 (5~15分钟)
+          random_increment=$(( RANDOM % 11 + 5 ))
+          current_total_minutes=$(( current_hour * 60 + current_minute ))
+          new_total_minutes=$(( current_total_minutes + random_increment ))
+
+          # 如果总分钟数超过了 119 分钟 (即达到了 UTC 02:00 边界)
+          # 无论有没有满 60 分钟进位，都强行回滚到 0 点的随机前 15 分钟
+          if [ $new_total_minutes -ge 120 ]; then
+            new_hour=0
+            new_minute=$(( RANDOM % 16 ))
+            echo "总时间已达或超过 UTC 02:00 边界，明天的 Cron 将回滚重置归零"
+          else
+            new_hour=$(( new_total_minutes / 60 ))
+            new_minute=$(( new_total_minutes % 60 ))
+          fi
 
           new_cron="$new_minute $new_hour * * *"
-          echo "新时间：$new_hour 时 $new_minute 分"
+          echo "当前运行时间 (UTC): $current_hour:$current_minute"
+          echo "顺延时间递增增量: +$random_increment 分钟"
+          echo "最终写入明天的 Cron 时间为：$new_cron"
           
-          # 替换并提交
+          # 替换并推送
           sed -i -E "s/- cron: '.*'/- cron: '$new_cron'/" "$yaml_file"
-          git config user.name "Actions"
-          git config user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add "$yaml_file"
-          git commit -m "Auto update cron to $new_cron"
+          git commit -m "chore: auto update cron to $new_cron [skip ci]"
+          git pull --rebase
           git push
