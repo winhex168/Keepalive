@@ -1,4 +1,4 @@
-name: Rustix Auto Start
+name: rustix-auto-alive
 
 on:
   # 定时触发：默认每 6 小时运行一次（可按需调整 cron 表达式）
